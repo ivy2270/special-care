@@ -5,9 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>身心障礙牙科治療代碼查詢</title>
 	<link rel="icon" type="image/png" href="charity_2770179.png">
-    
     <style>
-        /* 保留您原本的所有樣式 */
         body { font-family: '微軟正黑體', Arial, sans-serif; padding: 20px; background-color: #f4f7f6; max-width: 800px; margin: 0 auto; }
         h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
         h3 { color: #34495e; margin-top: 20px; }
@@ -34,6 +32,12 @@
         .mobile-field-title { font-weight: normal; color: #7f8c8d; min-width: 90px; margin-right: 5px; }
         .mobile-field-content { font-weight: bold; color: #2c3e50; flex-grow: 1; }
         @media (max-width: 600px) { .desktop-table { display: none; } .mobile-card-list { display: block; } }
+
+        /* 右下角更新按鈕 */
+        .refresh-data {
+            position: fixed; bottom: 20px; right: 20px; width: auto; font-size: 12px;
+            padding: 8px 12px; background: #95a5a6; opacity: 0.7; z-index: 100;
+        }
     </style>
 </head>
 <body>
@@ -66,6 +70,8 @@
     </div>
     <div id="code_list_results" style="display: none; padding: 0;"></div>
     
+    <button class="refresh-data" onclick="clearAppData()">🔄 清除快取並更新資料</button>
+
     <hr style="margin-top: 30px;">
     
     <div style="margin-top: 30px; padding: 15px; border-top: 1px solid #ddd;">
@@ -79,58 +85,147 @@
 
     <script>
         // ⚠️ 請填寫您的 Google Apps Script 部署網址
-        const API_URL = 'https://script.google.com/macros/s/AKfycbyAU0S9L3LAjxjC3Ops-P8FRUYtx7dqZaBF-uqqTYh6itSvXrKVlQXhb9vFdCnx7ORJjQ/exec';
+        const API_URL = 'https://script.google.com/macros/s/AKfycbyU6dQSElw84HUCbWJ6AyZBVBNFIz8N5r4k6Wc3jFLx2JIlg2GMs8aSkhjl20POoTDiww/exec';
+        
+        // 全域變數存放
+        let APP_DATA = { main: [], codeList: { headers: [], results: [] } };
+        const CACHE_KEY = 'dental_app_full_cache';
+        const EXPIRE_TIME = 24 * 60 * 60 * 1000; // 24小時
+        
+        // 邏輯常數 (需與 GS 同步)
+        const COMMON_CATEGORY = "共通項目";
+        const EXCLUDE_B_COMMON = ["發展遲緩兒童", "失能老人"];
+        const LEVEL_ORDER = ['輕度', '中度', '重度', '極重度', '發展遲緩兒童', '失能老人'];
 
-        // 頁面載入後自動取得第一層選單
         window.onload = function() {
-            callApi('getAOptions', {}, (data) => {
-                updateSelectOptions('a_category', data, '請選擇主要分類');
-            });
+            initApp();
         };
 
-        // 通用的 API 呼叫函數，取代 google.script.run
-        function callApi(action, params, callback) {
-            const url = new URL(API_URL);
-            url.searchParams.append('action', action);
-            for (const key in params) {
-                url.searchParams.append(key, params[key]);
+        // 初始化：先檢查快取，否則從網路抓取
+        function initApp() {
+            const cached = localStorage.getItem(CACHE_KEY);
+            const now = Date.now();
+
+            if (cached) {
+                const cacheData = JSON.parse(cached);
+                if (now - cacheData.timestamp < EXPIRE_TIME) {
+                    console.log("從快取啟動系統");
+                    APP_DATA = cacheData.data;
+                    initASelection();
+                    return;
+                }
             }
-            fetch(url)
-                .then(response => response.json())
-                .then(data => callback(data))
-                .catch(err => {
-                    console.error('API 錯誤:', err);
-                    alert('無法連線至後端服務，請檢查 API 網址是否正確。');
-                });
+
+            console.log("快取過期或不存在，從網路抓取...");
+            fetch(`${API_URL}?action=getMainData`)
+                .then(res => res.json())
+                .then(data => {
+                    APP_DATA = data;
+                    localStorage.setItem(CACHE_KEY, JSON.stringify({ timestamp: now, data: data }));
+                    initASelection();
+                })
+                .catch(err => alert("連線失敗，請檢查網路"));
         }
 
-        function processLineBreaks(value) {
-            if (!value) return '';
-            return String(value).replace(/\s*\[BR\]\s*/gi, '<br>').trim();
+        // 1. 初始化 A 選項 (不重複，排除共通項目)
+        function initASelection() {
+            const rows = APP_DATA.main.slice(1);
+            const uniqueA = [...new Set(rows
+                .map(r => r[0])
+                .filter(a => a && a !== COMMON_CATEGORY)
+            )];
+            updateSelectOptions('a_category', uniqueA, '請選擇主要分類');
         }
 
-        function processRawValue(value) {
-            if (!value) return '';
-            return String(value).trim();
+        // 2. 當 A 改變時，前端計算 B (極速)
+        function aCategoryChanged(aSelection) {
+            resetSelect('b_category', '請選擇障礙類別');
+            resetSelect('level', '請先選擇障礙類別');
+            resetQueryState();
+
+            const rows = APP_DATA.main.slice(1);
+            const uniqueB = new Set();
+            const shouldExcludeCommon = EXCLUDE_B_COMMON.includes(aSelection);
+
+            rows.forEach(row => {
+                if (row[0] === aSelection && row[1]) uniqueB.add(row[1].trim());
+                if (!shouldExcludeCommon && row[0] === COMMON_CATEGORY && row[1]) uniqueB.add(row[1].trim());
+            });
+
+            updateSelectOptions('b_category', Array.from(uniqueB).sort(), '請選擇障礙類別');
         }
-        
-        function updateSelectOptions(selectId, options, placeholder) {
-            const select = document.getElementById(selectId);
-            select.innerHTML = `<option value="" disabled selected>${placeholder}</option>`;
-            if (options && Array.isArray(options)) {
-                options.forEach(opt => {
-                    const o = document.createElement('option');
-                    o.value = o.text = opt;
-                    select.appendChild(o);
-                });
-                select.disabled = false;
+
+        // 3. 當 B 改變時，前端計算 Level (極速)
+        function bCategoryChanged(bSelection) {
+            resetSelect('level', '請選擇障礙等級');
+            resetQueryState();
+
+            const aSelection = document.getElementById('a_category').value;
+            const rows = APP_DATA.main.slice(1);
+            
+            const isSpecialB = bSelection.includes("13") || bSelection.includes("15") || bSelection.includes("16");
+            const effA = (isSpecialB && !EXCLUDE_B_COMMON.includes(aSelection)) ? COMMON_CATEGORY : aSelection;
+
+            const foundLevels = [...new Set(rows
+                .filter(r => r[0] === effA && r[1] === bSelection && r[2])
+                .map(r => r[2].trim())
+            )];
+
+            const sortedLevels = LEVEL_ORDER.filter(l => foundLevels.includes(l));
+            const levelSelect = document.getElementById('level');
+            updateSelectOptions('level', sortedLevels, '請選擇障礙等級');
+            
+            levelSelect.onchange = enableQueryButton;
+            if (sortedLevels.length === 1) {
+                levelSelect.selectedIndex = 1;
+                enableQueryButton();
             }
         }
 
-        function resetSelect(selectId, placeholder) {
-            const select = document.getElementById(selectId);
-            select.innerHTML = `<option value="" disabled selected>${placeholder}</option>`;
-            select.disabled = true;
+        // 4. 執行查詢 (從記憶體直接過濾)
+        function executeQuery() {
+            const a = document.getElementById('a_category').value;
+            const b = document.getElementById('b_category').value;
+            const l = document.getElementById('level').value;
+
+            const isSpecialB = b.includes("13") || b.includes("15") || b.includes("16");
+            const effA = (isSpecialB && !EXCLUDE_B_COMMON.includes(a)) ? COMMON_CATEGORY : a;
+
+            const results = APP_DATA.main.slice(1).filter(r => r[0] === effA && r[1] === b && r[2] === l);
+            displayResults({ headers: APP_DATA.main[0], results: results });
+        }
+
+        // 5. 顯示代碼清單 (不需再發 API)
+        function showCodeList() {
+            const btn = document.getElementById('show_code_button');
+            const res = document.getElementById('code_list_results');
+            if (res.style.display === 'block') {
+                res.style.display = 'none';
+                btn.textContent = '查看16案件健保申報代碼';
+                return;
+            }
+            res.style.display = 'block';
+            btn.textContent = '隱藏16案件健保申報代碼';
+            let html = '<div><p style="font-weight: bold; color: #16a085; margin-bottom: 15px;">未涵蓋項目亦可申報，但請注意身份是否符合</p>';
+            html += renderTable(APP_DATA.codeList.headers, APP_DATA.codeList.results);
+            html += renderCardList(APP_DATA.codeList.headers, APP_DATA.codeList.results);
+            html += '</div>';
+            res.innerHTML = html;
+        }
+
+        // --- 以下為通用輔助函數 ---
+
+        function updateSelectOptions(id, opts, placeholder) {
+            const s = document.getElementById(id);
+            s.innerHTML = `<option value="" disabled selected>${placeholder}</option>`;
+            opts.forEach(opt => { const o = document.createElement('option'); o.value = o.text = opt; s.appendChild(o); });
+            s.disabled = false;
+        }
+
+        function resetSelect(id, placeholder) {
+            const s = document.getElementById(id);
+            s.innerHTML = `<option value="" disabled selected>${placeholder}</option>`;
+            s.disabled = true;
         }
 
         function resetQueryState() {
@@ -138,58 +233,21 @@
             document.getElementById('results').innerHTML = '請在上方選擇查詢條件後點擊查詢。';
         }
 
-        function aCategoryChanged(val) {
-            resetSelect('b_category', '載入中...');
-            resetSelect('level', '請先選擇障礙類別');
-            resetQueryState();
-            if (val) callApi('getBOptions', { aSelection: val }, (data) => {
-                updateSelectOptions('b_category', data, '請選擇障礙類別');
-            });
-        }
+        function enableQueryButton() { document.getElementById('query_button').disabled = false; }
 
-        function bCategoryChanged(val) {
-            resetSelect('level', '載入中...');
-            resetQueryState();
-            const a = document.getElementById('a_category').value;
-            if (val) callApi('getLevelOptions', { aSelection: a, bSelection: val }, (data) => {
-                const levelSelect = document.getElementById('level');
-                updateSelectOptions('level', data, '請選擇障礙等級');
-                levelSelect.onchange = enableQueryButton;
-                // 自動選取邏輯
-                if (data && data.length === 1) {
-                    levelSelect.selectedIndex = 1;
-                    enableQueryButton();
-                }
-            });
-        }
-
-        function enableQueryButton() {
-            document.getElementById('query_button').disabled = false;
-        }
-
-        function executeQuery() {
-            const a = document.getElementById('a_category').value;
-            const b = document.getElementById('b_category').value;
-            const l = document.getElementById('level').value;
-            if (a && b && l) {
-                document.getElementById('query_button').disabled = true;
-                document.getElementById('results').innerHTML = '<p style="color: #3498db; font-weight: bold;">查詢中... 請稍候...</p>';
-                callApi('queryCode', { a, b, l }, displayResults);
-            }
-        }
+        function processLineBreaks(v) { return v ? String(v).replace(/\s*\[BR\]\s*/gi, '<br>').trim() : ''; }
+        function processRawValue(v) { return v ? String(v).trim() : ''; }
 
         function displayResults(response) {
-            document.getElementById('query_button').disabled = false;
             const resultsDiv = document.getElementById('results');
             if (!response.results || response.results.length === 0) {
-                resultsDiv.innerHTML = '<p class="no-result">⚠️ 查無符合條件的申報代碼或資料。</p>';
+                resultsDiv.innerHTML = '<p class="no-result">⚠️ 查無符合條件的資料。</p>';
                 return;
             }
-            const headers = response.headers;
             let html = '';
             response.results.forEach(row => {
                 html += '<table class="result-table">';
-                headers.forEach((h, i) => {
+                response.headers.forEach((h, i) => {
                     if (i >= 3 && row[i] !== '') {
                         const val = h.includes('備註') ? processLineBreaks(row[i]) : processRawValue(row[i]);
                         html += `<tr><th>${h}</th><td>${val}</td></tr>`;
@@ -198,26 +256,6 @@
                 html += '</table><br>';
             });
             resultsDiv.innerHTML = html;
-        }
-
-        function showCodeList() {
-            const btn = document.getElementById('show_code_button');
-            const res = document.getElementById('code_list_results');
-            if (res.style.display === 'block' && res.innerHTML !== '載入中...') {
-                res.style.display = 'none';
-                btn.textContent = '查看16案件健保申報代碼';
-                return;
-            }
-            res.style.display = 'block';
-            res.innerHTML = '<p style="color: #3498db; font-weight: bold;">資料載入中...</p>';
-            callApi('getCodeList', {}, (data) => {
-                btn.textContent = '隱藏16案件健保申報代碼';
-                let html = '<div><p style="font-weight: bold; color: #16a085; margin-bottom: 15px;">未涵蓋項目亦可申報，但請注意身份是否符合</p>';
-                html += renderTable(data.headers, data.results);
-                html += renderCardList(data.headers, data.results);
-                html += '</div>';
-                res.innerHTML = html;
-            });
         }
 
         function renderTable(headers, rows) {
@@ -238,8 +276,7 @@
         function renderCardList(headers, rows) {
             let h = '<ul class="mobile-card-list">';
             rows.forEach((row, idx) => {
-                const title = processRawValue(row[0]) || `項目 ${idx + 1}`;
-                h += `<li class="mobile-card"><h4>${title}</h4>`;
+                h += `<li class="mobile-card"><h4>${processRawValue(row[0]) || '項目'}</h4>`;
                 for (let i = 1; i < headers.length; i++) {
                     const val = headers[i].includes('備註') ? processLineBreaks(row[i]) : processRawValue(row[i]);
                     if (val) h += `<div class="mobile-field-row"><span class="mobile-field-title">${headers[i]}:</span><div class="mobile-field-content">${val}</div></div>`;
@@ -247,6 +284,12 @@
                 h += '</li>';
             });
             return h + '</ul>';
+        }
+
+        function clearAppData() {
+            localStorage.removeItem(CACHE_KEY);
+            alert('快取已清除，正在重新載入資料...');
+            location.reload();
         }
     </script>
 </body>
