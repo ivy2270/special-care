@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>身心障礙牙科治療代碼查詢</title>
+	<link rel="icon" type="image/png" href="charity_2770179.png">
+    
+    <style>
+        /* 保留您原本的所有樣式 */
+        body { font-family: '微軟正黑體', Arial, sans-serif; padding: 20px; background-color: #f4f7f6; max-width: 800px; margin: 0 auto; }
+        h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        h3 { color: #34495e; margin-top: 20px; }
+        label { display: block; margin-top: 15px; font-weight: bold; color: #34495e; }
+        select, button { padding: 10px; margin-top: 5px; border-radius: 5px; border: 1px solid #ccc; width: 100%; box-sizing: border-box; background-color: white; font-size: 16px; }
+        select:disabled, button:disabled { background-color: #ecf0f1; color: #bdc3c7; }
+        button { background-color: #3498db; color: white; cursor: pointer; border: none; }
+        button:hover:not(:disabled) { background-color: #2980b9; }
+        #results { margin-top: 20px; padding: 15px; background-color: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        #code_list_results > div { padding: 15px; background-color: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .result-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .result-table th, .result-table td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        .result-table th { background-color: #eaf2f8; color: #34495e; font-weight: bold; width: 30%; }
+        .no-result { color: #e74c3c; font-weight: bold; padding: 10px 0;}
+        a { text-decoration: none; color: #1a5276; font-weight: bold; transition: color 0.3s; }
+        a:hover { text-decoration: underline; color: #2980b9; }
+        .desktop-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        .desktop-table th, .desktop-table td { border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; font-size: 14px; }
+        .desktop-table th { background-color: #3498db; color: white; }
+        .mobile-card-list { display: none; padding: 0; list-style: none; }
+        .mobile-card { border: 1px solid #e0e0e0; padding: 15px; margin-bottom: 10px; border-radius: 6px; background-color: #f9f9f9; }
+        .mobile-card h4 { margin: 0 0 10px 0; color: #2c3e50; border-bottom: 2px solid #eaf2f8; padding-bottom: 5px; font-size: 14px; font-weight: bold; }
+        .mobile-field-row { display: flex; margin-bottom: 5px; line-height: 1.4; }
+        .mobile-field-title { font-weight: normal; color: #7f8c8d; min-width: 90px; margin-right: 5px; }
+        .mobile-field-content { font-weight: bold; color: #2c3e50; flex-grow: 1; }
+        @media (max-width: 600px) { .desktop-table { display: none; } .mobile-card-list { display: block; } }
+    </style>
+</head>
+<body>
+    <h1>🦷 身心障礙牙科代碼查詢</h1>
+
+    <label for="a_category">1. 選擇主要分類：</label>
+    <select id="a_category" onchange="aCategoryChanged(this.value)">
+        <option value="" disabled selected>載入中...</option>
+    </select>
+    
+    <label for="b_category">2. 選擇障礙類別：</label>
+    <select id="b_category" onchange="bCategoryChanged(this.value)" disabled>
+        <option value="" disabled selected>請先選擇主要分類</option>
+    </select>
+
+    <label for="level">3. 選擇障礙等級：</label>
+    <select id="level" disabled>
+        <option value="" disabled selected>請先選擇障礙類別</option>
+    </select>
+
+    <br>
+    <button id="query_button" onclick="executeQuery()" disabled>查詢申報代碼</button>
+    
+    <hr>
+    <h2>✅ 查詢結果</h2>
+    <div id="results">請在上方選擇查詢條件後點擊查詢。</div>
+    
+    <div style="margin-top: 25px;">
+        <button id="show_code_button" onclick="showCodeList()">查看16案件健保申報代碼</button>
+    </div>
+    <div id="code_list_results" style="display: none; padding: 0;"></div>
+    
+    <hr style="margin-top: 30px;">
+    
+    <div style="margin-top: 30px; padding: 15px; border-top: 1px solid #ddd;">
+        <p style="font-weight: bold; color: #e74c3c;">注意：本功能僅供參考，請自行查證正確性。</p>
+        <h3 style="color: #34495e; margin-top: 20px;">參考資料：</h3>
+        <ul style="list-style-type: disc; padding-left: 20px;">
+            <li style="margin-bottom: 8px;"><a href="https://www.cda.org.tw/cda/journal_list.jsp?cid=211" target="_blank" rel="noopener noreferrer">2025牙醫全聯會實用手冊p150及其他</a></li>
+            <li style="margin-bottom: 8px;"><a href="https://www.cda.org.tw/cda/news_detail.jsp?nid=987" target="_blank" rel="noopener noreferrer">114 年度全民健康保險牙醫門診總額特殊醫療服務計畫</a></li>
+        </ul>
+    </div>
+
+    <script>
+        // ⚠️ 請填寫您的 Google Apps Script 部署網址
+        const API_URL = 'https://script.google.com/macros/s/AKfycbyAU0S9L3LAjxjC3Ops-P8FRUYtx7dqZaBF-uqqTYh6itSvXrKVlQXhb9vFdCnx7ORJjQ/exec';
+
+        // 頁面載入後自動取得第一層選單
+        window.onload = function() {
+            callApi('getAOptions', {}, (data) => {
+                updateSelectOptions('a_category', data, '請選擇主要分類');
+            });
+        };
+
+        // 通用的 API 呼叫函數，取代 google.script.run
+        function callApi(action, params, callback) {
+            const url = new URL(API_URL);
+            url.searchParams.append('action', action);
+            for (const key in params) {
+                url.searchParams.append(key, params[key]);
+            }
+            fetch(url)
+                .then(response => response.json())
+                .then(data => callback(data))
+                .catch(err => {
+                    console.error('API 錯誤:', err);
+                    alert('無法連線至後端服務，請檢查 API 網址是否正確。');
+                });
+        }
+
+        function processLineBreaks(value) {
+            if (!value) return '';
+            return String(value).replace(/\s*\[BR\]\s*/gi, '<br>').trim();
+        }
+
+        function processRawValue(value) {
+            if (!value) return '';
+            return String(value).trim();
+        }
+        
+        function updateSelectOptions(selectId, options, placeholder) {
+            const select = document.getElementById(selectId);
+            select.innerHTML = `<option value="" disabled selected>${placeholder}</option>`;
+            if (options && Array.isArray(options)) {
+                options.forEach(opt => {
+                    const o = document.createElement('option');
+                    o.value = o.text = opt;
+                    select.appendChild(o);
+                });
+                select.disabled = false;
+            }
+        }
+
+        function resetSelect(selectId, placeholder) {
+            const select = document.getElementById(selectId);
+            select.innerHTML = `<option value="" disabled selected>${placeholder}</option>`;
+            select.disabled = true;
+        }
+
+        function resetQueryState() {
+            document.getElementById('query_button').disabled = true;
+            document.getElementById('results').innerHTML = '請在上方選擇查詢條件後點擊查詢。';
+        }
+
+        function aCategoryChanged(val) {
+            resetSelect('b_category', '載入中...');
+            resetSelect('level', '請先選擇障礙類別');
+            resetQueryState();
+            if (val) callApi('getBOptions', { aSelection: val }, (data) => {
+                updateSelectOptions('b_category', data, '請選擇障礙類別');
+            });
+        }
+
+        function bCategoryChanged(val) {
+            resetSelect('level', '載入中...');
+            resetQueryState();
+            const a = document.getElementById('a_category').value;
+            if (val) callApi('getLevelOptions', { aSelection: a, bSelection: val }, (data) => {
+                const levelSelect = document.getElementById('level');
+                updateSelectOptions('level', data, '請選擇障礙等級');
+                levelSelect.onchange = enableQueryButton;
+                // 自動選取邏輯
+                if (data && data.length === 1) {
+                    levelSelect.selectedIndex = 1;
+                    enableQueryButton();
+                }
+            });
+        }
+
+        function enableQueryButton() {
+            document.getElementById('query_button').disabled = false;
+        }
+
+        function executeQuery() {
+            const a = document.getElementById('a_category').value;
+            const b = document.getElementById('b_category').value;
+            const l = document.getElementById('level').value;
+            if (a && b && l) {
+                document.getElementById('query_button').disabled = true;
+                document.getElementById('results').innerHTML = '<p style="color: #3498db; font-weight: bold;">查詢中... 請稍候...</p>';
+                callApi('queryCode', { a, b, l }, displayResults);
+            }
+        }
+
+        function displayResults(response) {
+            document.getElementById('query_button').disabled = false;
+            const resultsDiv = document.getElementById('results');
+            if (!response.results || response.results.length === 0) {
+                resultsDiv.innerHTML = '<p class="no-result">⚠️ 查無符合條件的申報代碼或資料。</p>';
+                return;
+            }
+            const headers = response.headers;
+            let html = '';
+            response.results.forEach(row => {
+                html += '<table class="result-table">';
+                headers.forEach((h, i) => {
+                    if (i >= 3 && row[i] !== '') {
+                        const val = h.includes('備註') ? processLineBreaks(row[i]) : processRawValue(row[i]);
+                        html += `<tr><th>${h}</th><td>${val}</td></tr>`;
+                    }
+                });
+                html += '</table><br>';
+            });
+            resultsDiv.innerHTML = html;
+        }
+
+        function showCodeList() {
+            const btn = document.getElementById('show_code_button');
+            const res = document.getElementById('code_list_results');
+            if (res.style.display === 'block' && res.innerHTML !== '載入中...') {
+                res.style.display = 'none';
+                btn.textContent = '查看16案件健保申報代碼';
+                return;
+            }
+            res.style.display = 'block';
+            res.innerHTML = '<p style="color: #3498db; font-weight: bold;">資料載入中...</p>';
+            callApi('getCodeList', {}, (data) => {
+                btn.textContent = '隱藏16案件健保申報代碼';
+                let html = '<div><p style="font-weight: bold; color: #16a085; margin-bottom: 15px;">未涵蓋項目亦可申報，但請注意身份是否符合</p>';
+                html += renderTable(data.headers, data.results);
+                html += renderCardList(data.headers, data.results);
+                html += '</div>';
+                res.innerHTML = html;
+            });
+        }
+
+        function renderTable(headers, rows) {
+            let h = '<table class="desktop-table"><thead><tr>';
+            headers.forEach(txt => h += `<th>${txt}</th>`);
+            h += '</tr></thead><tbody>';
+            rows.forEach(row => {
+                h += '<tr>';
+                row.forEach((cell, i) => {
+                    const val = headers[i].includes('備註') ? processLineBreaks(cell) : processRawValue(cell);
+                    h += `<td>${val}</td>`;
+                });
+                h += '</tr>';
+            });
+            return h + '</tbody></table>';
+        }
+
+        function renderCardList(headers, rows) {
+            let h = '<ul class="mobile-card-list">';
+            rows.forEach((row, idx) => {
+                const title = processRawValue(row[0]) || `項目 ${idx + 1}`;
+                h += `<li class="mobile-card"><h4>${title}</h4>`;
+                for (let i = 1; i < headers.length; i++) {
+                    const val = headers[i].includes('備註') ? processLineBreaks(row[i]) : processRawValue(row[i]);
+                    if (val) h += `<div class="mobile-field-row"><span class="mobile-field-title">${headers[i]}:</span><div class="mobile-field-content">${val}</div></div>`;
+                }
+                h += '</li>';
+            });
+            return h + '</ul>';
+        }
+    </script>
+</body>
+</html>
